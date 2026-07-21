@@ -101,47 +101,66 @@ jobs:
 
       # ─── 5. UNPACK, DB MIGRATE/SEED, & PM2 RESTART ON TARGET SERVER ───
       - name: ⚡ Extract Bundle, Migrate DB, & Reload PM2
-        run: |
-          SSH_PORT="${{ secrets.SERVER_PORT || 22 }}"
-          SSH_USER="${{ secrets.SERVER_USER }}"
-          SSH_HOST="${{ secrets.SERVER_IP }}"
-          TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          envs: GITHUB_EVENT_NAME,RUN_MIGRATION,RUN_SEED,DEPLOY_DIR
+          script: |
+            # Source NVM or append common Node/npm/PM2 binaries to PATH for non-interactive SSH
+            export NVM_DIR="$HOME/.nvm"
+            if [ -s "$NVM_DIR/nvm.sh" ]; then
+              . "$NVM_DIR/nvm.sh"
+            fi
+            LATEST_NVM_NODE=$(ls $HOME/.nvm/versions/node 2>/dev/null | tail -n 1)
+            if [ -n "$LATEST_NVM_NODE" ]; then
+              export PATH=$HOME/.nvm/versions/node/$LATEST_NVM_NODE/bin:$PATH
+            fi
+            export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:$HOME/.npm-global/bin:$HOME/.yarn/bin
 
-          ssh -p $SSH_PORT $SSH_USER@$SSH_HOST bash -c "'
-            set -e
+            TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
+            mkdir -p $TARGET_DIR
             cd $TARGET_DIR
 
             # Unpack uploaded archive
             tar -xzf deploy.tar.gz
             rm -f deploy.tar.gz
 
+            # Check for node & npm
+            if ! command -v npm &> /dev/null; then
+              echo "❌ Error: npm is not found in PATH on the remote server."
+              echo "PATH is currently: $PATH"
+              exit 1
+            fi
+
             # Install PM2 globally if not already installed
             if ! command -v pm2 &> /dev/null; then
-              echo \"Installing PM2 globally...\"
+              echo "Installing PM2 globally..."
               npm install -g pm2 || sudo npm install -g pm2
             fi
 
             # Database Migration (Sync schema)
-            IF_MIGRATE=\"${{ github.event.inputs.run_migration }}\"
-            if [ \"\$IF_MIGRATE\" = \"true\" ] || [ \"${{ github.event_name }}\" = \"push\" ]; then
-              echo \"🗄️ Running Prisma Database Sync...\"
+            IF_MIGRATE="${{ github.event.inputs.run_migration }}"
+            if [ "$IF_MIGRATE" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
+              echo "🗄️ Running Prisma Database Sync..."
               cd backend
               npx prisma db push
               cd ..
             fi
 
             # Database Seeder (when triggered via workflow_dispatch with run_seed = true)
-            IF_SEED=\"${{ github.event.inputs.run_seed }}\"
-            if [ \"\$IF_SEED\" = \"true\" ]; then
-              echo \"🌱 Running Prisma Database Seeder...\"
+            IF_SEED="${{ github.event.inputs.run_seed }}"
+            if [ "$IF_SEED" = "true" ]; then
+              echo "🌱 Running Prisma Database Seeder..."
               cd backend
               npm run prisma:seed
               cd ..
             fi
 
             # Reload/Start PM2 Application Cluster
-            echo \"🔄 Reloading PM2 Processes...\"
+            echo "🔄 Reloading PM2 Processes..."
             pm2 startOrReload ecosystem.config.js --env production
             pm2 save
-            echo \"✅ Deployment completed successfully!\"
-          '"
+            echo "✅ Deployment completed successfully!"
