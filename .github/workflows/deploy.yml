@@ -51,28 +51,30 @@ jobs:
           npm ci
           npm run build
 
-      # ─── 3. ASSEMBLE DEPLOYMENT BUNDLE ───
+      # ─── 3. ASSEMBLE DEPLOYMENT BUNDLE (ON GITHUB RUNNER) ───
       - name: 🗂️ Assemble Standalone Deployment Package
         run: |
-          mkdir -p /var/www/html/LinkLens/backend /var/www/html/LinkLens/frontend
+          mkdir -p deploy-package/backend deploy-package/frontend
 
           # Copy Backend compiled dist & dependencies
-          cp -r backend/dist /var/www/html/LinkLens/backend/dist
-          cp -r backend/node_modules /var/www/html/LinkLens/backend/node_modules
-          cp -r backend/prisma /var/www/html/LinkLens/backend/prisma
-          cp backend/package.json /var/www/html/LinkLens/backend/package.json
+          cp -r backend/dist deploy-package/backend/dist
+          cp -r backend/node_modules deploy-package/backend/node_modules
+          cp -r backend/prisma deploy-package/backend/prisma
+          cp backend/package.json deploy-package/backend/package.json
 
-          # Copy Frontend Standalone output, static assets, and public files
-          cp -r frontend/.next/standalone/* /var/www/html/LinkLens/frontend/
-          mkdir -p /var/www/html/LinkLens/frontend/.next
-          cp -r frontend/.next/static /var/www/html/LinkLens/frontend/.next/static
-          cp -r frontend/public /var/www/html/LinkLens/frontend/public
+          # Copy Frontend Standalone output, static assets, and public files (if present)
+          cp -r frontend/.next/standalone/* deploy-package/frontend/
+          mkdir -p deploy-package/frontend/.next
+          cp -r frontend/.next/static deploy-package/frontend/.next/static
+          if [ -d "frontend/public" ]; then
+            cp -r frontend/public deploy-package/frontend/public
+          fi
 
           # Copy PM2 Ecosystem configuration
-          cp ecosystem.config.js /var/www/html/LinkLens/ecosystem.config.js
+          cp ecosystem.config.js deploy-package/ecosystem.config.js
 
           # Compress deployment bundle into a single archive
-          tar -czf deploy.tar.gz -C /var/www/html/LinkLens .
+          tar -czf deploy.tar.gz -C deploy-package .
 
       # ─── 4. TRANSFER ARCHIVE TO REMOTE SERVER ───
       - name: 🚀 Upload Deployment Package to Remote Server
@@ -83,9 +85,9 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           source: 'deploy.tar.gz'
-          target: ${{ secrets.DEPLOY_DIR || '/var/www/linklens' }}
+          target: ${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}
 
-      # ─── 5. UNPACK, DB MIGRATE/SEED, & PM2 RESTART ───
+      # ─── 5. UNPACK, DB MIGRATE/SEED, & PM2 RESTART ON TARGET SERVER ───
       - name: ⚡ Extract Bundle, Migrate DB, & Reload PM2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -94,7 +96,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           script: |
-            TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/linklens' }}"
+            TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
             mkdir -p $TARGET_DIR
             cd $TARGET_DIR
 
