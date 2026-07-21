@@ -43,4 +43,4 @@ CREATE TABLE IF NOT EXISTS linklens.click_events (
     is_bot UInt8
 ) ENGINE = MergeTree()
 ORDER BY (workspace_id, link_id, toYYYYMM(timestamp), timestamp)
-TTL timestamp + INTERVAL 365 DAY;
+TTL toDate(timestamp) + INTERVAL 365 DAY;
