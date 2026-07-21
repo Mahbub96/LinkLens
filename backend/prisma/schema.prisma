@@ -1,0 +1,219 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─── Enums ───
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  ANALYST
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+}
+
+// ─── Organizations & Workspaces ───
+
+model Organization {
+  id         String      @id @default(uuid())
+  name       String
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  workspaces Workspace[]
+}
+
+model Workspace {
+  id             String       @id @default(uuid())
+  name           String
+  slug           String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  anonymizeIps   Boolean      @default(false) // GDPR toggle
+  members        Member[]
+  links          Link[]
+  domains        Domain[]
+  apiKeys        ApiKey[]
+  webhooks       Webhook[]
+  campaigns      Campaign[]
+  invites        Invite[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+// ─── Users & RBAC ───
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  name          String?
+  avatarUrl     String?
+  emailVerified Boolean  @default(false)
+  twoFactorSecret String?
+  twoFactorEnabled Boolean @default(false)
+  members       Member[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Member {
+  id          String    @id @default(uuid())
+  role        Role      @default(MANAGER)
+  userId      String
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([userId, workspaceId])
+}
+
+model Invite {
+  id          String       @id @default(uuid())
+  email       String
+  role        Role         @default(MANAGER)
+  token       String       @unique
+  status      InviteStatus @default(PENDING)
+  workspaceId String
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime     @default(now())
+}
+
+// ─── Custom Domains ───
+
+model Domain {
+  id          String    @id @default(uuid())
+  hostname    String    @unique
+  isVerified  Boolean   @default(false)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// ─── Links & Routing Rules ───
+
+model Link {
+  id             String      @id @default(uuid())
+  slug           String
+  destinationUrl String
+  title          String?
+  workspaceId    String
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  domainHost     String      @default("default")
+  isEnabled      Boolean     @default(true)
+  isArchived     Boolean     @default(false)
+  isProtected    Boolean     @default(false)
+  password       String?
+  expiresAt      DateTime?
+  activatesAt    DateTime?
+  maxClicks      Int?
+  totalClicks    Int         @default(0)
+  campaignId     String?
+  campaign       Campaign?   @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  rules          MatchRule[]
+  qrCodes        QrCode[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([domainHost, slug])
+  @@index([workspaceId])
+}
+
+model MatchRule {
+  id             String   @id @default(uuid())
+  linkId         String
+  link           Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  priority       Int      @default(0)
+  conditionType  String   // GEO, DEVICE, BROWSER, OS, LANGUAGE, TOR, VPN, PROXY, TIME, AB_TEST
+  conditionValue String   // JSON: { "countries": ["US","UK"] } or { "weight": 50 }
+  targetUrl      String
+  createdAt      DateTime @default(now())
+}
+
+// ─── Campaigns ───
+
+model Campaign {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  tags        String[]  @default([])
+  color       String    @default("#6366f1")
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  links       Link[]
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workspaceId])
+}
+
+// ─── QR Codes ───
+
+model QrCode {
+  id            String   @id @default(uuid())
+  linkId        String
+  link          Link     @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  format        String   @default("svg") // svg, png, pdf
+  logoUrl       String?
+  fgColor       String   @default("#000000")
+  bgColor       String   @default("#ffffff")
+  cornerRadius  Int      @default(0)
+  errorLevel    String   @default("M") // L, M, Q, H
+  createdAt     DateTime @default(now())
+}
+
+// ─── API Keys ───
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String    // first 8 chars for identification
+  scopes      String[]  @default(["read"])
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// ─── Webhooks ───
+
+model Webhook {
+  id          String       @id @default(uuid())
+  url         String
+  events      String[]     // link.click, link.created, link.disabled, campaign.finished
+  secret      String       // HMAC signing key
+  isActive    Boolean      @default(true)
+  workspaceId String
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  logs        WebhookLog[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model WebhookLog {
+  id         String   @id @default(uuid())
+  webhookId  String
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event      String
+  payload    String   // JSON
+  statusCode Int?
+  response   String?
+  success    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}

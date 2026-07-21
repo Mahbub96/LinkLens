@@ -1,0 +1,25 @@
+{
+  admin off
+}
+
+:80 {
+  # API routes
+  handle /api/* {
+    reverse_proxy localhost:4000
+  }
+
+  # Redirect engine – short link catches
+  handle /r/* {
+    reverse_proxy localhost:4000
+  }
+
+  # Health endpoint
+  handle /healthz {
+    reverse_proxy localhost:4000
+  }
+
+  # Frontend
+  handle {
+    reverse_proxy localhost:3000
+  }
+}
