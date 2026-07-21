@@ -51,7 +51,7 @@ jobs:
           npm ci
           npm run build
 
-      # ─── 3. ASSEMBLE DEPLOYMENT BUNDLE (ON GITHUB RUNNER) ───
+      # ─── 3. ASSEMBLE DEPLOYMENT BUNDLE ───
       - name: 🗂️ Assemble Standalone Deployment Package
         run: |
           mkdir -p deploy-package/backend deploy-package/frontend
@@ -76,60 +76,72 @@ jobs:
           # Compress deployment bundle into a single archive
           tar -czf deploy.tar.gz -C deploy-package .
 
-      # ─── 4. TRANSFER ARCHIVE TO REMOTE SERVER ───
-      - name: 🚀 Upload Deployment Package to Remote Server
-        uses: appleboy/scp-action@v0.1.7
+      # ─── 4. SETUP SSH KEY & HOST KEYS ───
+      - name: 🔑 Setup SSH Key Agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          source: 'deploy.tar.gz'
-          target: ${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: 🚀 Upload Deployment Package to Remote Server
+        run: |
+          SSH_PORT="${{ secrets.SERVER_PORT || 22 }}"
+          SSH_USER="${{ secrets.SERVER_USER }}"
+          SSH_HOST="${{ secrets.SERVER_IP }}"
+          TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
+
+          # Add remote server host key to known_hosts
+          mkdir -p ~/.ssh
+          ssh-keyscan -p $SSH_PORT -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Ensure target directory exists on remote server with write permissions
+          ssh -p $SSH_PORT $SSH_USER@$SSH_HOST "mkdir -p $TARGET_DIR 2>/dev/null || (sudo mkdir -p $TARGET_DIR && sudo chown -R $SSH_USER $TARGET_DIR)"
+
+          # Transfer deployment archive via native OpenSSH SCP
+          scp -P $SSH_PORT deploy.tar.gz $SSH_USER@$SSH_HOST:$TARGET_DIR/deploy.tar.gz
 
       # ─── 5. UNPACK, DB MIGRATE/SEED, & PM2 RESTART ON TARGET SERVER ───
       - name: ⚡ Extract Bundle, Migrate DB, & Reload PM2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
-            mkdir -p $TARGET_DIR
+        run: |
+          SSH_PORT="${{ secrets.SERVER_PORT || 22 }}"
+          SSH_USER="${{ secrets.SERVER_USER }}"
+          SSH_HOST="${{ secrets.SERVER_IP }}"
+          TARGET_DIR="${{ secrets.DEPLOY_DIR || '/var/www/html/LinkLens' }}"
+
+          ssh -p $SSH_PORT $SSH_USER@$SSH_HOST bash -c "'
+            set -e
             cd $TARGET_DIR
 
             # Unpack uploaded archive
             tar -xzf deploy.tar.gz
-            rm deploy.tar.gz
+            rm -f deploy.tar.gz
 
             # Install PM2 globally if not already installed
             if ! command -v pm2 &> /dev/null; then
-              echo "Installing PM2 globally..."
-              npm install -g pm2
+              echo \"Installing PM2 globally...\"
+              npm install -g pm2 || sudo npm install -g pm2
             fi
 
             # Database Migration (Sync schema)
-            IF_MIGRATE="${{ github.event.inputs.run_migration }}"
-            if [ "$IF_MIGRATE" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
-              echo "🗄️ Running Prisma Database Sync..."
+            IF_MIGRATE=\"${{ github.event.inputs.run_migration }}\"
+            if [ \"\$IF_MIGRATE\" = \"true\" ] || [ \"${{ github.event_name }}\" = \"push\" ]; then
+              echo \"🗄️ Running Prisma Database Sync...\"
               cd backend
               npx prisma db push
               cd ..
             fi
 
             # Database Seeder (when triggered via workflow_dispatch with run_seed = true)
-            IF_SEED="${{ github.event.inputs.run_seed }}"
-            if [ "$IF_SEED" = "true" ]; then
-              echo "🌱 Running Prisma Database Seeder..."
+            IF_SEED=\"${{ github.event.inputs.run_seed }}\"
+            if [ \"\$IF_SEED\" = \"true\" ]; then
+              echo \"🌱 Running Prisma Database Seeder...\"
               cd backend
               npm run prisma:seed
               cd ..
             fi
 
             # Reload/Start PM2 Application Cluster
-            echo "🔄 Reloading PM2 Processes..."
+            echo \"🔄 Reloading PM2 Processes...\"
             pm2 startOrReload ecosystem.config.js --env production
             pm2 save
-            echo "✅ Deployment completed successfully!"
+            echo \"✅ Deployment completed successfully!\"
+          '"
