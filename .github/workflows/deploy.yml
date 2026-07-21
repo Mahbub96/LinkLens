@@ -141,6 +141,15 @@ jobs:
               npm install -g pm2 || sudo npm install -g pm2
             fi
 
+            # Ensure backend/.env exists for Prisma database connection
+            if [ ! -f "backend/.env" ]; then
+              if [ -f ".env" ]; then
+                cp .env backend/.env
+              elif [ -f ".env.example" ]; then
+                cp .env.example backend/.env
+              fi
+            fi
+
             # Database Migration (Sync schema)
             IF_MIGRATE="${{ github.event.inputs.run_migration }}"
             if [ "$IF_MIGRATE" = "true" ] || [ "${{ github.event_name }}" = "push" ]; then
