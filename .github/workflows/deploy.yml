@@ -63,7 +63,7 @@ jobs:
           cp backend/package.json deploy-package/backend/package.json
 
           # Copy Frontend Standalone output, static assets, and public files (if present)
-          cp -r frontend/.next/standalone/* deploy-package/frontend/
+          cp -r frontend/.next/standalone/. deploy-package/frontend/
           mkdir -p deploy-package/frontend/.next
           cp -r frontend/.next/static deploy-package/frontend/.next/static
           if [ -d "frontend/public" ]; then
