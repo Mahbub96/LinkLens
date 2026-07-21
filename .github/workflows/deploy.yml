@@ -54,25 +54,25 @@ jobs:
       # ─── 3. ASSEMBLE DEPLOYMENT BUNDLE ───
       - name: 🗂️ Assemble Standalone Deployment Package
         run: |
-          mkdir -p deploy-package/backend deploy-package/frontend
+          mkdir -p /var/www/html/LinkLens/backend /var/www/html/LinkLens/frontend
 
           # Copy Backend compiled dist & dependencies
-          cp -r backend/dist deploy-package/backend/dist
-          cp -r backend/node_modules deploy-package/backend/node_modules
-          cp -r backend/prisma deploy-package/backend/prisma
-          cp backend/package.json deploy-package/backend/package.json
+          cp -r backend/dist /var/www/html/LinkLens/backend/dist
+          cp -r backend/node_modules /var/www/html/LinkLens/backend/node_modules
+          cp -r backend/prisma /var/www/html/LinkLens/backend/prisma
+          cp backend/package.json /var/www/html/LinkLens/backend/package.json
 
           # Copy Frontend Standalone output, static assets, and public files
-          cp -r frontend/.next/standalone/* deploy-package/frontend/
-          mkdir -p deploy-package/frontend/.next
-          cp -r frontend/.next/static deploy-package/frontend/.next/static
-          cp -r frontend/public deploy-package/frontend/public
+          cp -r frontend/.next/standalone/* /var/www/html/LinkLens/frontend/
+          mkdir -p /var/www/html/LinkLens/frontend/.next
+          cp -r frontend/.next/static /var/www/html/LinkLens/frontend/.next/static
+          cp -r frontend/public /var/www/html/LinkLens/frontend/public
 
           # Copy PM2 Ecosystem configuration
-          cp ecosystem.config.js deploy-package/ecosystem.config.js
+          cp ecosystem.config.js /var/www/html/LinkLens/ecosystem.config.js
 
           # Compress deployment bundle into a single archive
-          tar -czf deploy.tar.gz -C deploy-package .
+          tar -czf deploy.tar.gz -C /var/www/html/LinkLens .
 
       # ─── 4. TRANSFER ARCHIVE TO REMOTE SERVER ───
       - name: 🚀 Upload Deployment Package to Remote Server
